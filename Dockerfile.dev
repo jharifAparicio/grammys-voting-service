@@ -1,7 +1,26 @@
-FROM rust:1.75-slim
-
+FROM rust:latest AS planner
 WORKDIR /usr/src/app
+RUN cargo install cargo-chef
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
+FROM rust:latest AS cacher
+WORKDIR /usr/src/app
+RUN cargo install cargo-chef
+COPY --from=planner /usr/src/app/recipe.json recipe.json
+RUN cargo chef cook --recipe-path recipe.json
+
+# 3. Entorno de ejecución en desarrollo
+FROM rust:latest AS builder
+WORKDIR /usr/src/app
+COPY . .
+COPY --from=cacher /usr/src/app/target target
+COPY --from=cacher /usr/local/cargo /usr/local/cargo
+
+# Instalar carg-watch para recarga en caliente
 RUN cargo install cargo-watch
 
-CMD ["tail", "-f", "/dev/null"]
+EXPOSE 8080
+
+# Comando para escuchar cambios en vivo
+CMD ["cargo", "watch", "-x", "run"]
