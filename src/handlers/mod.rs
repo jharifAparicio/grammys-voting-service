@@ -20,19 +20,30 @@ pub async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, Json(json_response))
 }
 
-// 🟢 NUEVO HANDLER: Registrar un voto por POST
 pub async fn create_vote_handler(
-    State(state): State<Arc<AppState>>, // Extrae de forma asíncrona nuestro pool de Mongo
-    Json(payload): Json<CreateVoteDto>, // Parsea automáticamente el cuerpo JSON entrante
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateVoteDto>,
 ) -> impl IntoResponse {
-    // Invocar al servicio para persistir el voto en Mongo
+    // 1. Persistencia síncrona en la base de datos
     match VoteService::create_vote(&state.db, payload).await {
         Ok(saved_vote) => {
-            // Si tiene éxito, responde con 201 Created y el objeto persistido con su ID
+            // 2. 🟢 NUEVO: Publicación asíncrona del evento en RabbitMQ
+            // Usamos un clon del canal AMQP (es muy barato de clonar porque es un puntero interno)
+            if let Err(err) =
+                VoteService::publish_vote_event(&state.amqp_channel, &saved_vote).await
+            {
+                // Si la mensajería falla, lanzamos un warning en logs, pero NO le rompemos la experiencia
+                // al usuario (el voto ya está seguro en MongoDB)
+                tracing::error!(
+                    "[RABBITMQ-ERROR] No se pudo publicar el evento de votación: {:?}",
+                    err
+                );
+            }
+
+            // 3. Responder de inmediato al cliente (201 Created)
             (StatusCode::CREATED, Json(serde_json::json!(saved_vote)))
         }
         Err(err) => {
-            // Si algo falla en la base de datos, responde un 500
             tracing::error!("[MONGODB-ERROR] Falló la inserción del voto: {:?}", err);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

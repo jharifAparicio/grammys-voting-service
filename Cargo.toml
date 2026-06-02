@@ -17,3 +17,4 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 mongodb = { version = "2.8.2", features = ["tokio-runtime", "bson-chrono-0_4"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 futures-util = "0.3.32"
+lapin = { version = "4.10.0", features = ["tokio"] }

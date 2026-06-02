@@ -50,3 +50,21 @@ pub struct CreateVoteDto {
     #[serde(rename = "nomineeId")]
     pub nominee_id: String,
 }
+
+#[derive(Debug, Serialize)]
+pub struct VoteCreatedEvent {
+    #[serde(rename = "voteId")]
+    pub vote_id: String,
+
+    #[serde(rename = "userId")]
+    pub user_id: String,
+
+    #[serde(rename = "categoryId")]
+    pub category_id: String,
+
+    #[serde(rename = "nomineeId")]
+    pub nominee_id: String,
+
+    #[serde(rename = "timestamp")]
+    pub timestamp: String,
+}

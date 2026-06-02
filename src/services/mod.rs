@@ -1,6 +1,8 @@
+use crate::models::VoteCreatedEvent;
 use crate::models::{CreateVoteDto, Vote};
 use chrono::Utc;
 use futures_util::stream::TryStreamExt;
+use lapin::{BasicProperties, Channel, options::BasicPublishOptions};
 use mongodb::bson::doc;
 use mongodb::error::Error;
 use mongodb::{Collection, Database};
@@ -49,5 +51,37 @@ impl VoteService {
 
         let votes: Vec<Vote> = cursor.try_collect().await?;
         Ok(votes)
+    }
+
+    pub async fn publish_vote_event(channel: &Channel, vote: &Vote) -> Result<(), lapin::Error> {
+        // 1. Construir el contrato del evento ligero
+        let event = VoteCreatedEvent {
+            vote_id: vote.id.map(|oid| oid.to_hex()).unwrap_or_default(),
+            user_id: vote.user_id.clone(),
+            category_id: vote.category_id.clone(),
+            nominee_id: vote.nominee_id.clone(),
+            timestamp: vote.created_at.to_rfc3339(), // Formato de fecha estándar para el ecosistema
+        };
+
+        // 2. Serializar el struct de Rust a un Vector de Bytes (JSON)
+        let payload = serde_json::to_vec(&event)
+            .expect("Error fatal: No se pudo serializar el evento de votación");
+
+        // 3. Disparar el mensaje de forma asíncrona a RabbitMQ
+        channel
+            .basic_publish(
+                "votes.exchange".into(), // Nombre del Exchange (lo declararemos en el broker)
+                "vote.created".into(),   // Routing Key (Criterio de enrutamiento)
+                BasicPublishOptions::default(),
+                &payload,
+                BasicProperties::default().with_content_type("application/json".into()),
+            )
+            .await?;
+
+        tracing::info!(
+            "[RABBITMQ] Evento 'vote.created' publicado con éxito para el voto: {}",
+            event.vote_id
+        );
+        Ok(())
     }
 }

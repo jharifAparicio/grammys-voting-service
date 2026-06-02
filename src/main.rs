@@ -10,40 +10,81 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-// 1. Estructura que almacena el pool de conexiones de MongoDB
+// 🟢 NUEVO: Importamos las estructuras de conexión de RabbitMQ
+use lapin::{Connection, ConnectionProperties};
+
+// 1. Expandimos el estado global para inyectar el Canal de RabbitMQ
 pub struct AppState {
     pub db: Database,
+    pub amqp_channel: lapin::Channel, // 🟢 Canal multiplexado inyectado
 }
 
 #[tokio::main]
 async fn main() {
-    // Inicializar el sistema de logs para ver las trazas en la terminal de Docker
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Cargar la configuración (incluyendo la MONGO_URI)
     let config = AppConfig::from_env();
 
-    // 2. Intentar la conexión asíncrona con MongoDB
+    // === CONFIGURACIÓN DE MONGODB ===
     tracing::info!(
         "[VOTING-SERVICE] Conectando a MongoDB en: {}",
         config.mongo_uri
     );
     let client = Client::with_uri_str(&config.mongo_uri)
         .await
-        .expect("Error crítico: No se pudo inicializar el cliente de MongoDB");
-
-    // Seleccionar la base de datos (si no existe, Mongo la crea al insertar el primer documento)
+        .expect("Error crítico al inicializar el cliente de MongoDB");
     let db = client.database("votes_db");
     tracing::info!("[VOTING-SERVICE] Conexión a MongoDB establecida con éxito.");
 
-    // 3. Envolver el estado en un Arc (Atomic Reference Counted) para compartirlo de forma segura entre hilos
-    let shared_state = Arc::new(AppState { db });
+    // === CONFIGURACIÓN DE RABBITMQ ===
+    tracing::info!(
+        "[VOTING-SERVICE] Conectando a RabbitMQ en: {}",
+        config.amqp_uri
+    );
+
+    // Inicializar la conexión TCP asíncrona usando el runtime de Tokio
+    let amqp_conn = Connection::connect(&config.amqp_uri, ConnectionProperties::default())
+        .await
+        .expect("Error crítico: No se pudo conectar con el servidor de RabbitMQ");
+
+    // Crear el canal de transmisión sobre la conexión persistente
+    let amqp_channel = amqp_conn
+        .create_channel()
+        .await
+        .expect("Error crítico: No se pudo crear el canal de comunicación AMQP");
+
+    tracing::info!("[VOTING-SERVICE] Conexión y canal de RabbitMQ inicializados con éxito.");
+
+    let amqp_channel = amqp_conn
+        .create_channel()
+        .await
+        .expect("Error crítico: No se pudo crear el canal de comunicación AMQP");
+
+    // 🟢 NUEVO: Declarar el Exchange de forma segura al arrancar
+    tracing::info!("[VOTING-SERVICE] Asegurando la infraestructura en RabbitMQ...");
+    amqp_channel
+        .exchange_declare(
+            "votes.exchange".into(),     // Nombre del Exchange
+            lapin::ExchangeKind::Direct, // Tipo de enrutamiento
+            lapin::options::ExchangeDeclareOptions {
+                durable: true, // Se mantiene vivo aunque RabbitMQ se reinicie
+                ..lapin::options::ExchangeDeclareOptions::default()
+            },
+            lapin::types::FieldTable::default(),
+        )
+        .await
+        .expect("Error crítico: No se pudo declarar el Exchange 'votes.exchange'");
+
+    tracing::info!(
+        "[VOTING-SERVICE] Conexión, canal y Exchange de RabbitMQ inicializados con éxito."
+    );
+
+    // 2. Empaquetamos ambos pools de conexiones en el Arc global
+    let shared_state = Arc::new(AppState { db, amqp_channel });
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
-
-    // Pasamos el estado inyectado al constructor del enrutador
     let app = routes::create_router(shared_state);
 
     tracing::info!(

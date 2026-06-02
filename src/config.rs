@@ -3,6 +3,7 @@ use std::env;
 pub struct AppConfig {
     pub port: u16,
     pub mongo_uri: String,
+    pub amqp_uri: String,
 }
 
 impl AppConfig {
@@ -18,6 +19,13 @@ impl AppConfig {
         let mongo_uri = env::var("MONGO_URI")
             .unwrap_or_else(|_| "mongodb://localhost:27017/votes_db".to_string());
 
-        AppConfig { port, mongo_uri }
+        let amqp_uri = env::var("AMQP_URI")
+            .unwrap_or_else(|_| "amqp://guest:guest@localhost:5672/%2f".to_string());
+
+        AppConfig {
+            port,
+            mongo_uri,
+            amqp_uri,
+        }
     }
 }

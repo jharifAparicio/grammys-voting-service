@@ -5,8 +5,8 @@ use crate::handlers::{
 use axum::{
     Router,
     routing::{get, post},
-}; // 🟢 Añadimos post
-use std::sync::Arc; // 🟢 Importamos el nuevo handler
+};
+use std::sync::Arc;
 
 pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
